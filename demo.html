@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>APA 2</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #0f172a;         /* slate-900 */
+      --panel: #1f2937;      /* gray-800 */
+      --panel-2: #374151;    /* gray-700 */
+      --text: #e5e7eb;       /* gray-200 */
+      --muted: #9ca3af;      /* gray-400 */
+      --accent: #9D4EDD;     /* purple for main car */
+      --ok: #16a34a;         /* green-600 */
+      --ok-hover: #15803d;   /* green-700 */
+      --warn: #ca8a04;       /* yellow-600 */
+      --err: #dc2626;        /* red-600 */
+      --err-hover: #b91c1c;  /* red-700 */
+      --info: #2563eb;       /* blue-600 */
+      --info-hover: #1d4ed8; /* blue-700 */
+      --parked: #1DB954;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100svh;
+      background: var(--bg);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      padding: 2rem;
+    }
+
+    .wrap {
+      display: grid;
+      gap: 1.25rem;
+      place-items: center;
+      max-width: 1200px;
+      width: 100%;
+    }
+
+    h1 { margin: 0; font-size: 1.9rem; }
+    .sub { color: var(--muted); margin-top: .25rem; }
+
+    .stage {
+      position: relative;
+      border: 4px solid var(--panel-2);
+      border-radius: 12px;
+      box-shadow: 0 30px 60px rgba(0,0,0,.45);
+      overflow: hidden;
+      width: 1200px;
+      max-width: 100%;
+      aspect-ratio: 3 / 1; /* matches 1200 x 400 */
+      background: #000;     /* fallback, canvas covers it */
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .75rem;
+      align-items: center;
+      justify-content: flex-end; /* put main buttons on the right side */
+      width: 100%;
+    }
+
+    .btn {
+      appearance: none;
+      border: 0;
+      border-radius: 10px;
+      padding: .9rem 1.6rem;
+      font-weight: 700;
+      color: white;
+      cursor: pointer;
+      transition: transform .06s ease, filter .15s ease, background-color .15s ease;
+      box-shadow: 0 12px 30px rgba(0,0,0,.25);
+    }
+    .btn:hover { filter: brightness(1.07); }
+    .btn:active { transform: translateY(1px) scale(.995); }
+
+    .btn--start { background: var(--ok); }
+    .btn--start:hover { background: var(--ok-hover); }
+
+    .btn--park { background: var(--info); animation: pulse 1.5s ease-in-out infinite; }
+    .btn--park:hover { background: var(--info-hover); }
+
+    .btn--reset { background: var(--err); }
+    .btn--reset:hover { background: var(--err-hover); }
+
+    @keyframes pulse {
+      0%, 100% { filter: brightness(1); }
+      50% { filter: brightness(1.15); }
+    }
+
+    .card {
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      width: min(900px, 100%);
+    }
+
+    .brakes {
+      display: flex;
+      gap: .5rem;
+      flex-wrap: wrap;
+      margin-top: .5rem;
+    }
+    .brake {
+      background: var(--panel-2);
+      color: #d1d5db;
+    }
+    .brake.active {
+      background: var(--ok);
+      color: white;
+    }
+    .brake[data-level="50"].active { background: var(--warn); }
+    .brake[data-level="100"].active { background: var(--err); }
+
+    .small { color: var(--muted); margin-top: .5rem; font-size: .9rem; }
+
+    .syslist { margin: .5rem 0 0; color: #cbd5e1; font-size: .95rem; }
+    .syslist li { margin: .15rem 0; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div>
+      <h1>Automated Parking Assist System</h1>
+      <div class="sub">Demonstration of a parallel parking manuever</div>
+    </div>
+
+    <div class="stage">
+      <canvas id="scene"></canvas>
+    </div>
+
+    <div class="controls">
+      <button id="startBtn" class="btn btn--start">Start Demo</button>
+      <button id="parkBtn" class="btn btn--park" style="display:none;">Begin Parking</button>
+      <button id="resetBtn" class="btn btn--reset" style="display:none;">Reset</button>
+    </div>
+
+    <div id="brakeCard" class="card" style="display:none;">
+      <strong>Brake Control</strong>
+      <div class="brakes" id="brakeGroup">
+        <button class="btn brake active" data-level="0">0% (Normal)</button>
+        <button class="btn brake" data-level="50">50% (Half Speed)</button>
+        <button class="btn brake" data-level="100">100% (Full Stop)</button>
+      </div>
+      <div class="small" id="brakeStatus">Current brake level: 0%</div>
+    </div>
+
+    <div class="card">
+      <strong>System Phases:</strong>
+      <ul class="syslist">
+        <li>• Phase 1-2: Search for parking spot with ultrasonics</li>
+        <li>• Phase 2-3: Detect invalid spot, continue searching</li>
+        <li>• Phase 3: Find valid spot (1.2× vehicle length)</li>
+        <li>• Phase 4: User approval, align with front vehicle</li>
+        <li>• Phase 5: Reverse into spot with automated steering</li>
+        <li>• Phase 6: Complete maneuver, return control to user</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    // --- Canvas setup ---
+    const canvas = document.getElementById('scene');
+    const ctx = canvas.getContext('2d');
+    const width = 1200;
+    const height = 400;
+    canvas.width = width;
+    canvas.height = height;
+
+    // --- UI elements ---
+    const startBtn = document.getElementById('startBtn');
+    const parkBtn  = document.getElementById('parkBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const brakeCard = document.getElementById('brakeCard');
+    const brakeGroup = document.getElementById('brakeGroup');
+    const brakeStatus = document.getElementById('brakeStatus');
+
+    // --- State ---
+    let started = false;
+    let showParkButton = false;
+    let brakeLevel = 0;     // 0, 50, 100
+    let raf = null;
+
+    const carWidth = 40;
+    const carLength = 80;
+
+    const parkedCars = [
+      { x: 150, y: 240, length: carLength, width: carWidth },
+      { x: 320, y: 240, length: carLength, width: carWidth }, // small gap after
+      { x: 420, y: 240, length: carLength, width: carWidth },
+      { x: 650, y: 240, length: carLength, width: carWidth }, // valid spot region
+    ];
+
+    const state = {
+      phase: "moving",
+      mainCar: { x: -80, y: 150, angle: 0, length: 80, width: 40 },
+      messageText: "",
+      messageTimer: 0,
+      backingStep: 0,
+      parkingStarted: false,
+      delayTimer: 0,
+    };
+
+    // --- Drawing helpers ---
+    function drawCar(car, color, angle = 0) {
+      ctx.save();
+
+      // For the main (purple) car during parking, rotate around the back axle
+      if (color === "#9D4EDD" && angle !== 0) {
+        ctx.translate(
+          car.x - (car.length / 2) * Math.cos(angle),
+          car.y - (car.length / 2) * Math.sin(angle)
+        );
+        ctx.rotate(angle);
+        ctx.translate(car.length / 2, 0);
+      } else {
+        ctx.translate(car.x, car.y);
+        ctx.rotate(angle);
+      }
+
+      // Body
+      ctx.fillStyle = color;
+      ctx.fillRect(-car.length / 2, -car.width / 2, car.length, car.width);
+
+      // Windows
+      ctx.fillStyle = "#333";
+      ctx.fillRect(
+        -car.length / 2 + 10,
+        -car.width / 2 + 5,
+        car.length - 20,
+        car.width - 10
+      );
+
+      // Outline
+      ctx.strokeStyle = "#000";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-car.length / 2, -car.width / 2, car.length, car.width);
+
+      ctx.restore();
+    }
+
+    function drawSensors(x, y) {
+      ctx.fillStyle = "rgba(255, 100, 100, 0.3)";
+      ctx.beginPath(); ctx.arc(x, y + carWidth / 2, 30, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y - carWidth / 2, 30, 0, Math.PI * 2); ctx.fill();
+    }
+
+    function drawMessage(text) {
+      if (!text) return;
+      ctx.fillStyle = "rgba(0,0,0,0.7)";
+      ctx.fillRect(10, 10, 300, 60);
+      ctx.fillStyle = "#fff";
+      ctx.font = "16px Arial, sans-serif";
+      const lines = text.split("\n");
+      lines.forEach((line, i) => ctx.fillText(line, 20, 30 + i * 20));
+    }
+
+    // --- Animation ---
+    function animate() {
+      // clear
+      ctx.clearRect(0, 0, width, height);
+
+      // road
+      ctx.fillStyle = "#555";
+      ctx.fillRect(0, 0, width, height);
+
+      // lane marker
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([20, 10]);
+      ctx.beginPath();
+      ctx.moveTo(0, 180);
+      ctx.lineTo(width, 180);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // parking area
+      ctx.fillStyle = "#666";
+      ctx.fillRect(0, 200, width, 200);
+
+      // parked cars (bottom lane)
+      parkedCars.forEach(c => drawCar(c, getComputedStyle(document.documentElement).getPropertyValue('--parked').trim() || "#1DB954"));
+
+      if (!started) {
+        raf = requestAnimationFrame(animate);
+        return;
+      }
+
+      // speed multiplier based on brake
+      let speedMultiplier = 1;
+      if (brakeLevel === 100) speedMultiplier = 0;
+      else if (brakeLevel === 50) speedMultiplier = 0.5;
+
+      // phases
+      if (state.phase === "moving") {
+        state.mainCar.x += 0.5 * speedMultiplier;
+        if (state.mainCar.x >= 200) {
+          state.phase = "checking1";
+          state.messageText = "Invalid: not 1.2x length\nContinues search for spot";
+          state.messageTimer = 90;
+        }
+      }
+      else if (state.phase === "checking1") {
+        if (state.messageTimer > 0) {
+          state.messageTimer--;
+          drawSensors(state.mainCar.x, state.mainCar.y);
+        } else {
+          state.phase = "checking2";
+        }
+      }
+      else if (state.phase === "checking2") {
+        state.mainCar.x += 0.5 * speedMultiplier;
+        if (state.mainCar.x >= 470) {
+          state.messageText = "Valid spot: 1.2x length\nUser approved";
+          state.messageTimer = 60;
+          showParkButton = true;
+          parkBtn.style.display = "inline-block";
+          state.phase = "waitingForUser";
+        }
+      }
+      else if (state.phase === "waitingForUser") {
+        drawSensors(state.mainCar.x, state.mainCar.y);
+        if (state.messageTimer > 0) state.messageTimer--;
+        if (state.parkingStarted) {
+          state.phase = "delayBeforeAlign";
+          state.messageText = "Preparing to park...";
+          state.delayTimer = 300; // ~5s at 60fps
+          showParkButton = false;
+          parkBtn.style.display = "none";
+          state.parkingStarted = false;
+        }
+      }
+      else if (state.phase === "delayBeforeAlign") {
+        drawSensors(state.mainCar.x, state.mainCar.y);
+        if (state.delayTimer > 0) state.delayTimer--;
+        else {
+          state.phase = "aligningForPark";
+          state.messageText = "Moves forward using ultrasonics";
+          state.messageTimer = 40;
+        }
+      }
+      else if (state.phase === "aligningForPark") {
+        if (state.mainCar.x < 600) {
+          state.mainCar.x += 0.4 * speedMultiplier;
+          drawSensors(state.mainCar.x, state.mainCar.y);
+        } else {
+          if (state.messageTimer > 0) {
+            state.messageTimer--;
+            drawSensors(state.mainCar.x, state.mainCar.y);
+          } else {
+            state.phase = "delayBeforeBacking";
+            state.messageText = "Preparing to reverse...";
+            state.delayTimer = 300;
+          }
+        }
+      }
+      else if (state.phase === "delayBeforeBacking") {
+        drawSensors(state.mainCar.x, state.mainCar.y);
+        if (state.delayTimer > 0) state.delayTimer--;
+        else {
+          state.phase = "backing";
+          state.messageText = "Starts backing up and turning\nusing ultrasonics";
+          state.backingStep = 0;
+        }
+      }
+      else if (state.phase === "backing") {
+        drawSensors(state.mainCar.x, state.mainCar.y);
+        if (state.backingStep < 300) {
+          if (speedMultiplier > 0) {
+            state.mainCar.angle -= 0.0035 * speedMultiplier;
+            state.mainCar.x -= 0.13 * speedMultiplier;
+            state.mainCar.y += 0.23 * speedMultiplier;
+          }
+          state.backingStep += speedMultiplier; // keeps time even at different speeds
+        } else {
+          state.phase = "straightening";
+          state.messageText = "Continues maneuver";
+          state.backingStep = 0;
+        }
+      }
+      else if (state.phase === "straightening") {
+        drawSensors(state.mainCar.x, state.mainCar.y);
+        if (state.mainCar.angle < 0.05) {
+          if (speedMultiplier > 0) {
+            state.mainCar.angle += 0.0035 * speedMultiplier;
+            state.mainCar.x -= 0.1 * speedMultiplier;
+            state.mainCar.y += 0.07 * speedMultiplier;
+          }
+          state.backingStep += speedMultiplier;
+        } else {
+          state.mainCar.angle = 0;
+          state.messageText = "Finishes maneuver\nReturns user control";
+          state.phase = "complete";
+        }
+      }
+      // complete: stay parked
+
+      // draw main car
+      drawCar(state.mainCar, "#9D4EDD", state.mainCar.angle);
+
+      // message
+      drawMessage(state.messageText);
+
+      raf = requestAnimationFrame(animate);
+    }
+
+    // --- UI Handlers ---
+    function resetState() {
+      state.phase = "moving";
+      state.mainCar = { x: -80, y: 150, angle: 0, length: 80, width: 40 };
+      state.messageText = "";
+      state.messageTimer = 0;
+      state.backingStep = 0;
+      state.parkingStarted = false;
+      state.delayTimer = 0;
+
+      started = false;
+      showParkButton = false;
+      brakeLevel = 0;
+      updateBrakeButtons();
+      brakeStatus.textContent = "Current brake level: 0%";
+
+      parkBtn.style.display = "none";
+      resetBtn.style.display = "none";
+      startBtn.style.display = "inline-block";
+      brakeCard.style.display = "none";
+    }
+
+    function startDemo() {
+      resetState(); // ensures clean state, but will immediately re-toggle controls below
+      started = true;
+
+      // show relevant controls
+      startBtn.style.display = "none";
+      resetBtn.style.display = "inline-block";
+      brakeCard.style.display = "block";
+
+      if (!raf) animate();
+    }
+
+    function beginParking() {
+      state.parkingStarted = true;
+    }
+
+    function hardReset() {
+      resetState();
+    }
+
+    // Brake buttons
+    function updateBrakeButtons() {
+      const buttons = brakeGroup.querySelectorAll('.brake');
+      buttons.forEach(btn => {
+        btn.classList.toggle('active', Number(btn.dataset.level) === brakeLevel);
+      });
+    }
+
+    brakeGroup.addEventListener('click', (e) => {
+      const btn = e.target.closest('.brake');
+      if (!btn) return;
+      brakeLevel = Number(btn.dataset.level);
+      updateBrakeButtons();
+      brakeStatus.textContent = `Current brake level: ${brakeLevel}%`;
+    });
+
+    // Button events
+    startBtn.addEventListener('click', startDemo);
+    parkBtn.addEventListener('click', beginParking);
+    resetBtn.addEventListener('click', hardReset);
+
+    // kick off animation loop so the canvas is always painted (even before start)
+    animate();
+  </script>
+</body>
+</html>
